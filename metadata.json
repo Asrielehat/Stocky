@@ -1,0 +1,5 @@
+{
+  "name": "Stocky",
+  "description": "智能股价预测与实时行情监控工具，结合 AI 趋势分析与最新财经新闻。",
+  "requestFramePermissions": []
+}
