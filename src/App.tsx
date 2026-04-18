@@ -331,17 +331,35 @@ export default function App() {
                   <StockChart 
                     data={combinedData} 
                     predictionStartIndex={historicalData.length} 
+                    validationData={prediction?.validationData}
                   />
                 </CardContent>
               </Card>
 
               {prediction && (
                 <Card className="bg-primary/5 border-primary/20">
-                  <CardHeader>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
                     <CardTitle className="text-lg font-semibold flex items-center gap-2">
                       <FileText className="w-5 h-5 text-primary" />
-                      AI 趋势分析
+                      AI 趋势分析 (70/30 验证模式)
                     </CardTitle>
+                    {prediction.validationAccuracy && (
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase text-slate-400 font-bold">回测准确度</p>
+                          <p className={`text-sm font-mono font-bold ${prediction.validationAccuracy.score > 80 ? "text-emerald-600" : "text-amber-600"}`}>
+                            {prediction.validationAccuracy.score}%
+                          </p>
+                        </div>
+                        <div className="h-8 w-px bg-slate-200" />
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase text-slate-400 font-bold">平均误差 (MAE)</p>
+                          <p className="text-sm font-mono font-bold text-slate-700">
+                            ${prediction.validationAccuracy.mae.toFixed(3)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </CardHeader>
                   <CardContent>
                     <p className="text-slate-700 leading-relaxed">

@@ -15,13 +15,24 @@ import { StockData } from "../types";
 interface StockChartProps {
   data: StockData[];
   predictionStartIndex: number;
+  validationData?: StockData[];
 }
 
-export const StockChart: React.FC<StockChartProps> = ({ data, predictionStartIndex }) => {
+export const StockChart: React.FC<StockChartProps> = ({ data, predictionStartIndex, validationData }) => {
+  // Combine all data for consistent X-Axis
+  // We need to match validation points to their dates in the actual data
+  const chartData = data.map(item => {
+    const valPoint = validationData?.find(v => v.date === item.date);
+    return {
+      ...item,
+      validationPrice: valPoint?.price
+    };
+  });
+
   return (
     <div className="w-full h-[400px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+        <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
           <XAxis 
             dataKey="date" 
@@ -51,26 +62,39 @@ export const StockChart: React.FC<StockChartProps> = ({ data, predictionStartInd
             stroke="#2563eb"
             strokeWidth={2}
             dot={false}
-            name="Historical Price"
+            name="实际价格"
             activeDot={{ r: 6 }}
             connectNulls
           />
+
+          {/* Validation Line (AI Simulation of the 30% segment) */}
+          {validationData && (
+            <Line
+              type="monotone"
+              dataKey="validationPrice"
+              stroke="#fbbf24"
+              strokeWidth={2}
+              strokeDasharray="5 5"
+              dot={false}
+              name="AI 模拟验证 (回测)"
+            />
+          )}
           
-          {/* Prediction Line - we'll use a different color or style if we could, 
-              but Recharts Line usually applies to the whole set. 
-              Instead, we can use a ReferenceLine to mark the start of prediction.
-          */}
+          {/* Future Prediction Line part is handled by the dataKey="price" where isPrediction is true */}
+          {/* But we want to distinguish it. Recharts doesn't handle segment coloring well on one line easily. 
+              Instead, let's use a reference line for the split. */}
+          
           {predictionStartIndex > 0 && (
             <ReferenceLine 
               x={data[predictionStartIndex]?.date} 
               stroke="#ef4444" 
-              label={{ value: 'Prediction Start', position: 'top', fill: '#ef4444', fontSize: 12 }} 
+              label={{ value: '预测开始', position: 'top', fill: '#ef4444', fontSize: 12 }} 
               strokeDasharray="3 3"
             />
           )}
 
-          {/* To show prediction differently, we can use another Line with only prediction data 
-              but that requires data formatting. For now, let's just use one line and the reference line.
+          {/* Let's mark the 70/30 split point if we can calculate it. 
+              But usually predictionStartIndex is enough for the main split.
           */}
         </LineChart>
       </ResponsiveContainer>
