@@ -3,9 +3,62 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import yahooFinance from "yahoo-finance2";
 import Parser from "rss-parser";
+import iconv from "iconv-lite";
 
 const yf = new (yahooFinance as any)();
 const rssParser = new Parser();
+
+// Helper to convert Yahoo symbol to Sina symbol (e.g., 600519.SS -> sh600519)
+const toSinaSymbol = (symbol: string) => {
+  const clean = symbol.toUpperCase();
+  if (clean.endsWith(".SS")) return `sh${clean.replace(".SS", "")}`;
+  if (clean.endsWith(".SZ")) return `sz${clean.replace(".SZ", "")}`;
+  if (/^\d{6}$/.test(clean)) {
+    return (clean.startsWith("6") || clean.startsWith("5")) ? `sh${clean}` : `sz${clean}`;
+  }
+  return clean;
+};
+
+// Fetch A-share historical data from Sina
+async function fetchSinaHistorical(symbol: string) {
+  const sinaSym = toSinaSymbol(symbol);
+  // scale=240 means daily data
+  const url = `http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=${sinaSym}&scale=240&ma=no&datalen=500`;
+  
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Sina API response error");
+  
+  const data = await response.json();
+  if (!Array.isArray(data)) return null;
+
+  return data.map((item: any) => ({
+    date: item.day.split(" ")[0],
+    price: parseFloat(item.close)
+  }));
+}
+
+// Fetch A-share name and realtime quote from Sina
+async function fetchSinaQuote(symbol: string) {
+  const sinaSym = toSinaSymbol(symbol);
+  const url = `http://hq.sinajs.cn/list=${sinaSym}`;
+  
+  const response = await fetch(url, {
+    headers: { "Referer": "http://finance.sina.com.cn" }
+  });
+  
+  const arrayBuffer = await response.arrayBuffer();
+  const text = iconv.decode(Buffer.from(arrayBuffer), "gbk");
+  
+  const match = text.match(/\"(.*)\"/);
+  if (!match || !match[1]) return null;
+  
+  const parts = match[1].split(",");
+  return {
+    name: parts[0], // Chinese Name
+    price: parseFloat(parts[3]),
+    change: ((parseFloat(parts[3]) - parseFloat(parts[2])) / parseFloat(parts[2])) * 100
+  };
+}
 
 async function startServer() {
   const app = express();
@@ -47,6 +100,26 @@ async function startServer() {
     }
 
     try {
+      // If A-Share, use Sina as primary source for stability in China
+      if (isAShare(symbol)) {
+        try {
+          const [sinaData, sinaQuote] = await Promise.all([
+            fetchSinaHistorical(symbol),
+            fetchSinaQuote(symbol)
+          ]);
+          
+          if (sinaData && sinaData.length > 0) {
+            return res.json({
+              symbol: symbol,
+              name: sinaQuote?.name || symbol,
+              data: sinaData
+            });
+          }
+        } catch (sinaErr) {
+          console.warn("Sina Engine failed, falling back to Yahoo:", sinaErr);
+        }
+      }
+
       const endDate = end ? new Date(end as string) : new Date();
       const startDate = start ? new Date(start as string) : new Date();
       
@@ -153,24 +226,41 @@ async function startServer() {
     if (symbols.length === 0) return res.json([]);
 
     try {
-      const results = await yf.quote(symbols);
-      const formatted = Array.isArray(results) ? results : [results];
-      
-      // Enhance results with better names for A-shares
-      const enhancedResults = await Promise.all(formatted.map(async (q: any) => {
-        let name = q.shortName || q.longName || q.symbol;
-        if (isAShare(q.symbol)) {
-          name = await getBetterName(q.symbol, name);
-        }
-        return {
-          symbol: q.symbol,
-          price: Number(q.regularMarketPrice?.toFixed(3)),
-          change: Number(q.regularMarketChangePercent?.toFixed(3)),
-          name: name
-        };
-      }));
+      // Split symbols into A-shares and Others
+      const aShareSymbols = symbols.filter(s => isAShare(s));
+      const otherSymbols = symbols.filter(s => !isAShare(s));
 
-      res.json(enhancedResults);
+      let aShareResults: any[] = [];
+      if (aShareSymbols.length > 0) {
+        aShareResults = await Promise.all(aShareSymbols.map(async (s) => {
+          try {
+            const q = await fetchSinaQuote(s);
+            return q ? {
+              symbol: s,
+              price: Number(q.price.toFixed(3)),
+              change: Number(q.change.toFixed(3)),
+              name: q.name
+            } : null;
+          } catch (e) { return null; }
+        }));
+      }
+
+      let otherResults: any[] = [];
+      if (otherSymbols.length > 0) {
+        const results = await yf.quote(otherSymbols);
+        const formatted = Array.isArray(results) ? results : [results];
+        otherResults = await Promise.all(formatted.map(async (q: any) => {
+          let name = q.shortName || q.longName || q.symbol;
+          return {
+            symbol: q.symbol,
+            price: Number(q.regularMarketPrice?.toFixed(3)),
+            change: Number(q.regularMarketChangePercent?.toFixed(3)),
+            name: name
+          };
+        }));
+      }
+
+      res.json([...aShareResults, ...otherResults].filter(Boolean));
     } catch (error) {
       console.error("Quotes Error:", error);
       res.status(500).json({ error: "获取行情失败。" });
