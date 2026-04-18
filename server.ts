@@ -13,11 +13,20 @@ async function startServer() {
 
   // API Route to fetch stock data with date range
   app.get("/api/stock/:symbol", async (req, res) => {
-    const symbol = req.params.symbol?.trim().toUpperCase();
+    let symbol = req.params.symbol?.trim().toUpperCase();
     const { start, end } = req.query;
     
     if (!symbol) {
       return res.status(400).json({ error: "请输入有效的股票代码。" });
+    }
+
+    // Handle A-share numeric codes
+    if (/^\d{6}$/.test(symbol)) {
+      if (symbol.startsWith("6") || symbol.startsWith("5") || symbol.startsWith("8") || symbol.startsWith("9")) {
+        symbol = `${symbol}.SS`; // Shanghai
+      } else if (symbol.startsWith("0") || symbol.startsWith("3")) {
+        symbol = `${symbol}.SZ`; // Shenzhen
+      }
     }
 
     try {
@@ -56,8 +65,17 @@ async function startServer() {
 
   // API Route to fetch stock news
   app.get("/api/news/:symbol", async (req, res) => {
-    const symbol = req.params.symbol?.trim().toUpperCase();
+    let symbol = req.params.symbol?.trim().toUpperCase();
     if (!symbol) return res.status(400).json({ error: "缺少股票代码" });
+
+    // Handle A-share numeric codes
+    if (/^\d{6}$/.test(symbol)) {
+      if (symbol.startsWith("6") || symbol.startsWith("5") || symbol.startsWith("8") || symbol.startsWith("9")) {
+        symbol = `${symbol}.SS`;
+      } else if (symbol.startsWith("0") || symbol.startsWith("3")) {
+        symbol = `${symbol}.SZ`;
+      }
+    }
 
     try {
       const result = await yf.search(symbol, { newsCount: 5 });
@@ -70,7 +88,19 @@ async function startServer() {
 
   // API Route to fetch multiple stock quotes for watchlist
   app.get("/api/quotes", async (req, res) => {
-    const symbols = (req.query.symbols as string || "").split(",").filter(Boolean);
+    const symbols = (req.query.symbols as string || "").split(",").filter(Boolean).map(s => {
+      let sym = s.trim().toUpperCase();
+      // Handle A-share numeric codes
+      if (/^\d{6}$/.test(sym)) {
+        if (sym.startsWith("6") || sym.startsWith("5") || sym.startsWith("8") || sym.startsWith("9")) {
+          return `${sym}.SS`;
+        } else if (sym.startsWith("0") || sym.startsWith("3")) {
+          return `${sym}.SZ`;
+        }
+      }
+      return sym;
+    });
+
     if (symbols.length === 0) return res.json([]);
 
     try {

@@ -235,10 +235,10 @@ export default function App() {
             <Label className="text-xs text-slate-500 ml-1">股票代码</Label>
             <div className="relative">
               <Input
-                placeholder="如 AAPL"
+                placeholder="如 AAPL 或 600519"
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value)}
-                className="w-32 pl-8"
+                className="w-40 pl-8"
               />
               <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
@@ -449,7 +449,7 @@ export default function App() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="text-sm text-slate-600 space-y-2">
-                  <p>1. 输入股票代码（如 AAPL）并点击导入，或上传包含 "Date" 和 "Close" 列的 CSV 文件。</p>
+                  <p>1. 输入股票代码（如美股 AAPL 或 A股 600519/000001）并点击导入，或上传 CSV 文件。</p>
                   <p>2. 系统将解析并可视化历史趋势。</p>
                   <p>3. 点击“生成预测”，Gemini AI 将分析模式并预测未来 10 天的走势。</p>
                   <p className="text-xs italic text-slate-400 mt-4">
@@ -472,7 +472,7 @@ export default function App() {
               <div className="mt-6 flex flex-col items-center gap-4 w-full max-w-md px-6">
                 <form onSubmit={fetchStockData} className="flex items-center gap-2 w-full">
                   <Input
-                    placeholder="输入代码 (如 TSLA)"
+                    placeholder="代码 (如 TSLA 或 600519)"
                     value={symbol}
                     onChange={(e) => setSymbol(e.target.value)}
                     className="flex-1"
