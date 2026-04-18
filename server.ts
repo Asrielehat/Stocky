@@ -10,6 +10,18 @@ import { ProxyAgent, setGlobalDispatcher } from "undici";
 
 dotenv.config();
 
+// API Key Verification Log (Safe masking)
+const rawKey = process.env.GEMINI_API_KEY;
+if (rawKey) {
+  const masked = `${rawKey.substring(0, 4)}...${rawKey.substring(rawKey.length - 4)}`;
+  console.log(`[Config] GEMINI_API_KEY loaded: ${masked} (Length: ${rawKey.length})`);
+  if (!rawKey.startsWith("AIza")) {
+    console.warn("[Config] WARNING: Your API Key does not start with 'AIza'. It might be incorrect.");
+  }
+} else {
+  console.error("[Config] ERROR: GEMINI_API_KEY is missing! Please check your .env file.");
+}
+
 // Fix for Node.js fetch not respecting HTTPS_PROXY in local dev
 if (process.env.HTTPS_PROXY) {
   try {
@@ -34,7 +46,7 @@ function getGenModel() {
       throw new Error("GEMINI_API_KEY is not set in environment variables.");
     }
     const genAI = new GoogleGenerativeAI(apiKey);
-    _model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    _model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
   }
   return _model;
 }
