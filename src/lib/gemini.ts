@@ -33,9 +33,9 @@ export async function predictStockPrice(historicalData: StockData[], news: any[]
       }
     `;
 
-    const modelName = "gemini-3-flash-preview";
+    const modelName = "gemini-3-flash-preview"; // 免费预览版 Flash，配额极高
     
-    // Attempt prediction with fallback
+    // 强制只使用 Flash 系列（免费模型）
     let result;
     try {
       result = await ai.models.generateContent({
@@ -43,7 +43,8 @@ export async function predictStockPrice(historicalData: StockData[], news: any[]
         contents: prompt,
       });
     } catch (err: any) {
-      console.warn(`[AI] Model ${modelName} failed, falling back to gemini-1.5-flash:`, err.message);
+      console.warn(`[AI] ${modelName} 尝试失败，正在切换至通用免费版 gemini-1.5-flash...`);
+      // 这里的 1.5-flash 也是 Google 永久提供免费层级的模型
       result = await ai.models.generateContent({
         model: "gemini-1.5-flash",
         contents: prompt,
