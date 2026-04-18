@@ -6,8 +6,21 @@ import Parser from "rss-parser";
 import iconv from "iconv-lite";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
 
 dotenv.config();
+
+// Fix for Node.js fetch not respecting HTTPS_PROXY in local dev
+if (process.env.HTTPS_PROXY) {
+  try {
+    const proxyUrl = process.env.HTTPS_PROXY;
+    console.log(`[Proxy] Detected HTTPS_PROXY, setting global dispatcher: ${proxyUrl}`);
+    const dispatcher = new ProxyAgent(proxyUrl);
+    setGlobalDispatcher(dispatcher);
+  } catch (err) {
+    console.error("[Proxy] Failed to set global proxy dispatcher:", err);
+  }
+}
 
 const yf = new (yahooFinance as any)();
 const rssParser = new Parser();
@@ -371,8 +384,12 @@ async function startServer() {
         }
       });
     } catch (error: any) {
-      console.error("Gemini API Error:", error);
-      res.status(500).json({ error: `AI 预测服务不可用: ${error.message}` });
+      console.error("Gemini API Error Detail:", error);
+      let errorMsg = error.message;
+      if (errorMsg.includes("fetch failed") || errorMsg.includes("UND_ERR_CONNECT_TIMEOUT")) {
+        errorMsg = "网络连接失败。提示：请检查本地是否开启科学上网代理，并在启动终端执行 set HTTPS_PROXY=http://127.0.0.1:您的代理端口";
+      }
+      res.status(500).json({ error: `AI 预测服务异常: ${errorMsg}` });
     }
   });
 
