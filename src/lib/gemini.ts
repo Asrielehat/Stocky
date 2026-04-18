@@ -3,7 +3,7 @@ import { StockData, PredictionResult } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-export async function predictStockPrice(historicalData: StockData[], news: any[] = []): Promise<PredictionResult> {
+export async function predictStockPrice(historicalData: StockData[], news: any[] = [], stockName: string = ""): Promise<PredictionResult> {
   // Take last 60 points for a better split (42 training, 18 test)
   const dataForSplit = historicalData.slice(-60);
   const splitIndex = Math.floor(dataForSplit.length * 0.7);
@@ -11,9 +11,10 @@ export async function predictStockPrice(historicalData: StockData[], news: any[]
   const testData = dataForSplit.slice(splitIndex); // The 30% "hidden" reality
   
   const newsContext = news.map(n => n.title).join("\n");
+  const identifier = stockName ? `${stockName} (${historicalData[0]?.date}至今)` : "该股票";
   
   const prompt = `
-    你是一位资深的金融量化分析师。我们将执行一个“回测+预测”的复合流程。
+    你是一位资深的金融量化分析师。我们将针对 ${identifier} 执行一个“回测+预测”的复合流程。
     
     第一步：回测验证 (Backtesting Context)
     这是前 70% 的训练数据：
@@ -26,7 +27,7 @@ export async function predictStockPrice(historicalData: StockData[], news: any[]
     ${newsContext || "暂无相关新闻"}
     
     你的任务：
-    1. 模拟回测：请模拟分析如果仅凭前 70% 的数据，你会如何预测那段时期的走势？请提供那 30% 期间的模拟模拟点。
+    1. 模拟回测：请模拟分析如果仅凭前 70% 的数据，你会如何预测那段时期的走势？请提供那 30% 期间的模拟点。
     2. 误差分析：将你的模拟观点与真实的 30% 数据对比，分析为什么会产生误差（是受到新闻影响、市场波动还是模式转变？）。
     3. 未来预测：结合所有历史数据和分析心得，预测未来 10 天的价格走势。
     
@@ -34,7 +35,7 @@ export async function predictStockPrice(historicalData: StockData[], news: any[]
     {
       "validationPoints": [{"date": "...", "price": ...}], // 对应测试集时段的模拟点
       "predictions": [{"date": "...", "price": ...}], // 未来 10 天的预测点
-      "analysis": "核心分析内容，需包含对误差的复盘和对未来的展望",
+      "analysis": "核心分析内容，需包含对误差的复盘和对未来的展望。请确保提到股票的具体名称（如果有）。",
       "accuracyScore": 85 // 你认为你的模式识别准确度（0-100）
     }
     

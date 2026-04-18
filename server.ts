@@ -2,14 +2,31 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import yahooFinance from "yahoo-finance2";
+import Parser from "rss-parser";
 
 const yf = new (yahooFinance as any)();
+const rssParser = new Parser();
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Helper to check if it's an A-share symbol
+  const isAShare = (symbol: string) => /\.SS$|\.SZ$/.test(symbol) || /^\d{6}$/.test(symbol);
+
+  // Helper to get a better name (especially Chinese names for A-shares)
+  const getBetterName = async (symbol: string, defaultName: string) => {
+    if (!isAShare(symbol)) return defaultName;
+    try {
+      const searchResult = await yf.search(symbol);
+      const bestMatch = searchResult.quotes.find((q: any) => q.symbol === symbol);
+      return bestMatch?.shortname || bestMatch?.longname || defaultName;
+    } catch (e) {
+      return defaultName;
+    }
+  };
 
   // API Route to fetch stock data with date range
   app.get("/api/stock/:symbol", async (req, res) => {
@@ -43,20 +60,34 @@ async function startServer() {
         interval: "1d" as const,
       };
 
-      const result = await yf.chart(symbol, queryOptions);
+      // Fetch both chart data and quote for the name
+      const [chartResult, quoteResult] = await Promise.all([
+        yf.chart(symbol, queryOptions),
+        yf.quote(symbol).catch(() => null)
+      ]);
       
-      if (!result || !result.quotes || result.quotes.length === 0) {
+      if (!chartResult || !chartResult.quotes || chartResult.quotes.length === 0) {
         return res.status(404).json({ error: `未找到股票代码 "${symbol}" 的数据。` });
       }
 
-      const formattedData = result.quotes
+      const formattedData = chartResult.quotes
         .filter((item: any) => item.close !== null && item.close !== undefined && item.date !== undefined)
         .map((item: any) => ({
           date: item.date instanceof Date ? item.date.toISOString().split("T")[0] : new Date(item.date).toISOString().split("T")[0],
           price: Number(item.close.toFixed(3)),
         }));
 
-      res.json(formattedData);
+      // For A-shares, try to get the Chinese name if possible
+      let finalName = quoteResult?.shortName || quoteResult?.longName || symbol;
+      if (isAShare(symbol)) {
+        finalName = await getBetterName(symbol, finalName);
+      }
+
+      res.json({
+        symbol: symbol,
+        name: finalName,
+        data: formattedData
+      });
     } catch (error: any) {
       console.error(`Yahoo Finance Error for ${symbol}:`, error);
       res.status(500).json({ error: "获取股价数据失败。" });
@@ -78,6 +109,24 @@ async function startServer() {
     }
 
     try {
+      if (isAShare(symbol)) {
+        // Fetch Chinese news from Google News RSS for A-shares
+        const name = await getBetterName(symbol, symbol);
+        const searchQuery = encodeURIComponent(`${name} 股票`);
+        const rssUrl = `https://news.google.com/rss/search?q=${searchQuery}+when:30d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans`;
+        
+        const feed = await rssParser.parseURL(rssUrl);
+        const chineseNews = feed.items.slice(0, 5).map(item => ({
+          title: item.title,
+          link: item.link,
+          publisher: item.creator || item.source?.["_"] || "相关新闻",
+          providerPublishTime: new Date(item.pubDate || Date.now()).getTime() / 1000
+        }));
+        
+        return res.json(chineseNews);
+      }
+
+      // Default to Yahoo news for US stocks
       const result = await yf.search(symbol, { newsCount: 5 });
       res.json(result.news || []);
     } catch (error) {
@@ -106,12 +155,22 @@ async function startServer() {
     try {
       const results = await yf.quote(symbols);
       const formatted = Array.isArray(results) ? results : [results];
-      res.json(formatted.map((q: any) => ({
-        symbol: q.symbol,
-        price: Number(q.regularMarketPrice?.toFixed(3)),
-        change: Number(q.regularMarketChangePercent?.toFixed(3)),
-        name: q.shortName || q.longName
-      })));
+      
+      // Enhance results with better names for A-shares
+      const enhancedResults = await Promise.all(formatted.map(async (q: any) => {
+        let name = q.shortName || q.longName || q.symbol;
+        if (isAShare(q.symbol)) {
+          name = await getBetterName(q.symbol, name);
+        }
+        return {
+          symbol: q.symbol,
+          price: Number(q.regularMarketPrice?.toFixed(3)),
+          change: Number(q.regularMarketChangePercent?.toFixed(3)),
+          name: name
+        };
+      }));
+
+      res.json(enhancedResults);
     } catch (error) {
       console.error("Quotes Error:", error);
       res.status(500).json({ error: "获取行情失败。" });

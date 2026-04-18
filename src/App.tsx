@@ -24,6 +24,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [symbol, setSymbol] = useState("");
+  const [currentStockName, setCurrentStockName] = useState<string>("");
   
   // Watchlist states
   const [watchlist, setWatchlist] = useState<string[]>(() => {
@@ -117,9 +118,11 @@ export default function App() {
         const data = await priceRes.json();
         throw new Error(data.error || "获取股价失败");
       }
-      const priceData = await priceRes.json();
-      setHistoricalData(priceData);
-
+      const stockInfo = await priceRes.json();
+      setHistoricalData(stockInfo.data);
+      setCurrentStockName(stockInfo.name);
+      setFileName(`${sym} - ${stockInfo.name}`);
+      
       // Fetch News
       const newsRes = await fetch(`/api/news/${sym}`);
       if (newsRes.ok) {
@@ -132,7 +135,6 @@ export default function App() {
       setIsLoading(false);
     }
   };
-
   const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -194,7 +196,7 @@ export default function App() {
     setError(null);
 
     try {
-      const result = await predictStockPrice(historicalData, news);
+      const result = await predictStockPrice(historicalData, news, currentStockName);
       setPrediction(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred.");
@@ -423,6 +425,10 @@ export default function App() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <div className="flex justify-between items-center py-2 border-bottom border-slate-100">
+                    <span className="text-slate-600">股票名称</span>
+                    <span className="font-medium text-slate-900">{currentStockName || symbol}</span>
+                  </div>
                   <div className="flex justify-between items-center py-2 border-bottom border-slate-100">
                     <span className="text-slate-600">总数据点</span>
                     <span className="font-mono font-medium">{historicalData.length}</span>
