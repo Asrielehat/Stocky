@@ -1,4 +1,4 @@
-# Project Nonsense | 瞎搞计划
+# Stocky |  啥也不能预测的预测股价
 
 ![Status](https://img.shields.io/badge/信任度-0%25-red)
 ![Purpose](https://img.shields.io/badge/目的-纯属玩笑-blue)
