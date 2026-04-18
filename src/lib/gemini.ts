@@ -1,4 +1,3 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { StockData, PredictionResult } from "../types";
 
 export async function predictStockPrice(historicalData: StockData[], news: any[] = [], stockName: string = ""): Promise<PredictionResult> {

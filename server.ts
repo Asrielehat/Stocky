@@ -6,7 +6,6 @@ import Parser from "rss-parser";
 import iconv from "iconv-lite";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
-import { ProxyAgent, setGlobalDispatcher } from "undici";
 
 dotenv.config();
 
@@ -22,18 +21,6 @@ if (rawKey) {
   console.error("[Config] ERROR: GEMINI_API_KEY is missing! Please check your .env file.");
 }
 
-// Fix for Node.js fetch not respecting HTTPS_PROXY in local dev
-if (process.env.HTTPS_PROXY) {
-  try {
-    const proxyUrl = process.env.HTTPS_PROXY;
-    console.log(`[Proxy] Detected HTTPS_PROXY, setting global dispatcher: ${proxyUrl}`);
-    const dispatcher = new ProxyAgent(proxyUrl);
-    setGlobalDispatcher(dispatcher);
-  } catch (err) {
-    console.error("[Proxy] Failed to set global proxy dispatcher:", err);
-  }
-}
-
 const yf = new (yahooFinance as any)();
 const rssParser = new Parser();
 
@@ -46,7 +33,7 @@ function getGenModel() {
       throw new Error("GEMINI_API_KEY is not set in environment variables.");
     }
     const genAI = new GoogleGenerativeAI(apiKey);
-    _model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+    _model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
   }
   return _model;
 }
