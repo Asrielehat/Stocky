@@ -4,9 +4,27 @@ import path from "path";
 import yahooFinance from "yahoo-finance2";
 import Parser from "rss-parser";
 import iconv from "iconv-lite";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const yf = new (yahooFinance as any)();
 const rssParser = new Parser();
+
+// Lazy Gemini initialization to prevent startup crashes
+let _model: any = null;
+function getGenModel() {
+  if (!_model) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not set in environment variables.");
+    }
+    const genAI = new GoogleGenerativeAI(apiKey);
+    _model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  }
+  return _model;
+}
 
 // Helper to convert Yahoo symbol to Sina symbol (e.g., 600519.SS -> sh600519)
 const toSinaSymbol = (symbol: string) => {
@@ -100,6 +118,13 @@ async function startServer() {
     }
 
     try {
+      const endDate = end ? new Date(end as string) : new Date();
+      const startDate = start ? new Date(start as string) : new Date();
+      
+      if (!start) {
+        startDate.setFullYear(endDate.getFullYear() - 2);
+      }
+
       // If A-Share, use Sina as primary source for stability in China
       if (isAShare(symbol)) {
         try {
@@ -109,22 +134,21 @@ async function startServer() {
           ]);
           
           if (sinaData && sinaData.length > 0) {
+            // Filter Sina data by date range
+            const filteredSinaData = sinaData.filter((item: any) => {
+              const itemDate = new Date(item.date);
+              return itemDate >= startDate && itemDate <= endDate;
+            });
+
             return res.json({
               symbol: symbol,
               name: sinaQuote?.name || symbol,
-              data: sinaData
+              data: filteredSinaData
             });
           }
         } catch (sinaErr) {
           console.warn("Sina Engine failed, falling back to Yahoo:", sinaErr);
         }
-      }
-
-      const endDate = end ? new Date(end as string) : new Date();
-      const startDate = start ? new Date(start as string) : new Date();
-      
-      if (!start) {
-        startDate.setFullYear(endDate.getFullYear() - 2);
       }
 
       const queryOptions = {
@@ -148,7 +172,12 @@ async function startServer() {
         .map((item: any) => ({
           date: item.date instanceof Date ? item.date.toISOString().split("T")[0] : new Date(item.date).toISOString().split("T")[0],
           price: Number(item.close.toFixed(3)),
-        }));
+        }))
+        // Ensure accurate filtering even for Yahoo results
+        .filter((item: any) => {
+          const itemDate = new Date(item.date);
+          return itemDate >= startDate && itemDate <= endDate;
+        });
 
       // For A-shares, try to get the Chinese name if possible
       let finalName = quoteResult?.shortName || quoteResult?.longName || symbol;
@@ -264,6 +293,86 @@ async function startServer() {
     } catch (error) {
       console.error("Quotes Error:", error);
       res.status(500).json({ error: "获取行情失败。" });
+    }
+  });
+
+  // API Route for AI Prediction
+  app.post("/api/predict", async (req, res) => {
+    const { historicalData, news, stockName } = req.body;
+    
+    if (!historicalData || !Array.isArray(historicalData)) {
+      return res.status(400).json({ error: "缺少历史数据" });
+    }
+
+    try {
+      // Logic from gemini.ts migrated to server
+      const dataForSplit = historicalData.slice(-60);
+      const splitIndex = Math.floor(dataForSplit.length * 0.7);
+      const trainingData = dataForSplit.slice(0, splitIndex);
+      const testData = dataForSplit.slice(splitIndex);
+      
+      const newsContext = (news || []).map((n: any) => n.title).join("\n");
+      const identifier = stockName ? `${stockName} (${historicalData[0]?.date}至今)` : "该股票";
+      
+      const prompt = `
+        你是一位资深的金融量化分析师。我们将针对 ${identifier} 执行一个“回测+预测”的复合流程。
+        
+        第一步：回测验证 (Backtesting Context)
+        这是前 70% 的训练数据：
+        ${JSON.stringify(trainingData)}
+        
+        这是另外 30% 的真实测试数据（仅供你分析误差用）：
+        ${JSON.stringify(testData)}
+        
+        近期新闻背景：
+        ${newsContext || "暂无相关新闻"}
+        
+        你的任务：
+        1. 模拟回测：请模拟分析如果仅凭前 70% 的数据，你会如何预测那段时期的走势？请提供那 30% 期间的模拟点。
+        2. 误差分析：将你的模拟观点与真实的 30% 数据对比，分析为什么会产生误差（是受到新闻影响、市场波动还是模式转变？）。
+        3. 未来预测：结合所有历史数据和分析心得，预测未来 10 天的价格走势。
+        
+        请按以下 JSON 格式返回：
+        {
+          "validationPoints": [{"date": "...", "price": ...}], 
+          "predictions": [{"date": "...", "price": ...}], 
+          "analysis": "核心分析内容，需包含对误差的复盘和对未来的展望。请确保提到股票的具体名称（如果有）。",
+          "accuracyScore": 85 
+        }
+        
+        请务必使用中文进行分析，且输出必须是合法的 JSON。
+      `;
+
+      const aiModel = getGenModel();
+      const result = await aiModel.generateContent(prompt);
+      const response = await result.response;
+      const jsonText = response.text().replace(/```json|```/g, "").trim();
+      const aiResult = JSON.parse(jsonText);
+
+      // MAE calculation logic
+      let mae = 0;
+      if (aiResult.validationPoints.length > 0 && testData.length > 0) {
+        const minLen = Math.min(aiResult.validationPoints.length, testData.length);
+        let sumAbsError = 0;
+        for (let i = 0; i < minLen; i++) {
+          sumAbsError += Math.abs(aiResult.validationPoints[i].price - testData[i].price);
+        }
+        mae = sumAbsError / minLen;
+      }
+
+      res.json({
+        predictions: aiResult.predictions.map((p: any) => ({ ...p, isPrediction: true })),
+        validationData: aiResult.validationPoints.map((p: any) => ({ ...p, isPrediction: true })),
+        analysis: aiResult.analysis,
+        validationAccuracy: {
+          mae: mae,
+          rmse: Math.sqrt(mae * mae),
+          score: aiResult.accuracyScore || 80
+        }
+      });
+    } catch (error: any) {
+      console.error("Gemini API Error:", error);
+      res.status(500).json({ error: `AI 预测服务不可用: ${error.message}` });
     }
   });
 
