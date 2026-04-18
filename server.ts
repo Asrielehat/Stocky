@@ -4,10 +4,23 @@ import path from "path";
 import yahooFinance from "yahoo-finance2";
 import Parser from "rss-parser";
 import iconv from "iconv-lite";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
 
 dotenv.config();
+
+// Fix for Node.js fetch not respecting HTTPS_PROXY in local dev (China)
+const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy;
+if (proxyUrl && (proxyUrl.includes("127.0.0.1") || proxyUrl.includes("localhost"))) {
+  try {
+    const dispatcher = new ProxyAgent(proxyUrl);
+    setGlobalDispatcher(dispatcher);
+    console.log(`[Proxy] Global dispatcher set to ${proxyUrl}`);
+  } catch (err) {
+    console.warn("[Proxy] Failed to set global dispatcher", err);
+  }
+}
 
 // API Key Verification Log (Safe masking)
 const rawKey = process.env.GEMINI_API_KEY;
@@ -23,20 +36,6 @@ if (rawKey) {
 
 const yf = new (yahooFinance as any)();
 const rssParser = new Parser();
-
-// Lazy Gemini initialization to prevent startup crashes
-let _model: any = null;
-function getGenModel() {
-  if (!_model) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY is not set in environment variables.");
-    }
-    const genAI = new GoogleGenerativeAI(apiKey);
-    _model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-  }
-  return _model;
-}
 
 // Helper to convert Yahoo symbol to Sina symbol (e.g., 600519.SS -> sh600519)
 const toSinaSymbol = (symbol: string) => {
@@ -305,90 +304,6 @@ async function startServer() {
     } catch (error) {
       console.error("Quotes Error:", error);
       res.status(500).json({ error: "获取行情失败。" });
-    }
-  });
-
-  // API Route for AI Prediction
-  app.post("/api/predict", async (req, res) => {
-    const { historicalData, news, stockName } = req.body;
-    
-    if (!historicalData || !Array.isArray(historicalData)) {
-      return res.status(400).json({ error: "缺少历史数据" });
-    }
-
-    try {
-      // Logic from gemini.ts migrated to server
-      const dataForSplit = historicalData.slice(-60);
-      const splitIndex = Math.floor(dataForSplit.length * 0.7);
-      const trainingData = dataForSplit.slice(0, splitIndex);
-      const testData = dataForSplit.slice(splitIndex);
-      
-      const newsContext = (news || []).map((n: any) => n.title).join("\n");
-      const identifier = stockName ? `${stockName} (${historicalData[0]?.date}至今)` : "该股票";
-      
-      const prompt = `
-        你是一位资深的金融量化分析师。我们将针对 ${identifier} 执行一个“回测+预测”的复合流程。
-        
-        第一步：回测验证 (Backtesting Context)
-        这是前 70% 的训练数据：
-        ${JSON.stringify(trainingData)}
-        
-        这是另外 30% 的真实测试数据（仅供你分析误差用）：
-        ${JSON.stringify(testData)}
-        
-        近期新闻背景：
-        ${newsContext || "暂无相关新闻"}
-        
-        你的任务：
-        1. 模拟回测：请模拟分析如果仅凭前 70% 的数据，你会如何预测那段时期的走势？请提供那 30% 期间的模拟点。
-        2. 误差分析：将你的模拟观点与真实的 30% 数据对比，分析为什么会产生误差（是受到新闻影响、市场波动还是模式转变？）。
-        3. 未来预测：结合所有历史数据和分析心得，预测未来 10 天的价格走势。
-        
-        请按以下 JSON 格式返回：
-        {
-          "validationPoints": [{"date": "...", "price": ...}], 
-          "predictions": [{"date": "...", "price": ...}], 
-          "analysis": "核心分析内容，需包含对误差的复盘和对未来的展望。请确保提到股票的具体名称（如果有）。",
-          "accuracyScore": 85 
-        }
-        
-        请务必使用中文进行分析，且输出必须是合法的 JSON。
-      `;
-
-      const aiModel = getGenModel();
-      const result = await aiModel.generateContent(prompt);
-      const response = await result.response;
-      const jsonText = response.text().replace(/```json|```/g, "").trim();
-      const aiResult = JSON.parse(jsonText);
-
-      // MAE calculation logic
-      let mae = 0;
-      if (aiResult.validationPoints.length > 0 && testData.length > 0) {
-        const minLen = Math.min(aiResult.validationPoints.length, testData.length);
-        let sumAbsError = 0;
-        for (let i = 0; i < minLen; i++) {
-          sumAbsError += Math.abs(aiResult.validationPoints[i].price - testData[i].price);
-        }
-        mae = sumAbsError / minLen;
-      }
-
-      res.json({
-        predictions: aiResult.predictions.map((p: any) => ({ ...p, isPrediction: true })),
-        validationData: aiResult.validationPoints.map((p: any) => ({ ...p, isPrediction: true })),
-        analysis: aiResult.analysis,
-        validationAccuracy: {
-          mae: mae,
-          rmse: Math.sqrt(mae * mae),
-          score: aiResult.accuracyScore || 80
-        }
-      });
-    } catch (error: any) {
-      console.error("Gemini API Error Detail:", error);
-      let errorMsg = error.message;
-      if (errorMsg.includes("fetch failed") || errorMsg.includes("UND_ERR_CONNECT_TIMEOUT")) {
-        errorMsg = "网络连接失败。提示：请检查本地是否开启科学上网代理，并在启动终端执行 set HTTPS_PROXY=http://127.0.0.1:您的代理端口";
-      }
-      res.status(500).json({ error: `AI 预测服务异常: ${errorMsg}` });
     }
   });
 

@@ -38,8 +38,9 @@ npm install
 
 ## 5. 模型 404 错误提示
 如果报错 `404 Not Found`，通常是因为：
-*   使用了错误的模型别名。本程序默认使用 `gemini-1.5-flash`。
-*   您的 API Key 不支持该模型 (免费版 Key 默认支持 flash 模型)。
+*   使用了错误的模型别名。本程序默认使用最新的 `gemini-3-flash-preview`。
+*   如果您的 Key 比较旧，可以尝试在 `.env` 中设置 `GEMINI_MODEL=gemini-1.5-flash` 进行回退。
+*   您的 API Key 不支持该模型。
 
 ---
 如果您在部署过程中遇到任何问题，请随时在 AI Studio 中咨询。
